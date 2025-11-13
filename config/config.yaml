@@ -1,0 +1,192 @@
+system:
+  name: "Hybrid NTL Detection System"
+  version: "1.0.0"
+  mode: "production"  # development, staging, production
+  
+# Data Configuration
+data:
+  smart_meter:
+    sampling_rate: 30  # minutes
+    required_fields:
+      - voltage_magnitude
+      - active_power
+      - reactive_power
+      - timestamp
+    
+  transformer:
+    sampling_rate: 1   # minutes
+    required_fields:
+      - voltage
+      - active_power
+      - reactive_power
+      - angle
+      
+  grid_topology:
+    topology_file: "data/grid_topology.json"
+    line_parameters: "data/line_impedance.csv"
+    uncertainty_tolerance: 0.25  # ±25%
+
+# Feature Engineering
+features:
+  consumption_features:
+    - last_3_months_consumption
+    - last_12_months_consumption
+    - consumption_vs_zone_avg
+    - consumption_diff_6months
+    - months_zero_consumption
+    - min_max_bill_ratio
+    
+  visit_features:
+    - ntl_history_count
+    - last_visit_type
+    - impossible_visit_count
+    - threat_count
+    
+  static_features:
+    - tariff_type
+    - meter_location
+    - contracted_power
+    - town
+    
+  sociological_features:
+    - avg_income_zone
+    - unemployment_rate
+    - conflicting_neighborhood_ratio
+
+# ML Model Configuration
+ml_model:
+  type: "catboost_regression"
+  target: "energy_recovered_kwh"
+  loss_function: "RMSE"
+  
+  hyperparameters:
+    iterations: 1000
+    learning_rate: 0.03
+    depth: 6
+    l2_leaf_reg: 3
+    random_strength: 1
+    bagging_temperature: 1
+    
+  early_stopping:
+    enabled: true
+    rounds: 50
+    metric: "AveragePrecision"
+    
+  training:
+    train_split: 0.8
+    validation_split: 0.1
+    test_split: 0.1
+    stratify: true
+
+# Physics Model Configuration
+physics_model:
+  pso:
+    n_particles: 200
+    n_iterations: 500
+    w_max: 0.9
+    w_min: 0.4
+    c1_upper: 2.5
+    c1_lower: 1.5
+    c2_upper: 2.5
+    c2_lower: 1.5
+    
+  power_flow:
+    method: "newton_raphson"
+    tolerance: 1e-17
+    max_iterations: 100
+    
+  transformer:
+    max_apparent_power_kva: 22
+
+# Detection Configuration
+detection:
+  streak_signal:
+    time_window_hours: 24
+    k_sigma: 2.5  # threshold multiplier
+    min_streak_count: 3
+    
+  approaches:
+    - name: "zero_consumption"
+      priority: 1
+      enabled: true
+      
+    - name: "state_estimation"
+      priority: 2
+      enabled: true
+      
+    - name: "random_sampling"
+      priority: 3
+      enabled: false
+      sample_size: 3
+      
+    - name: "ml_prioritization"
+      priority: 4
+      enabled: true
+      top_k_percent: 10
+
+# Hybrid Fusion
+fusion:
+  ml_weight: 0.6
+  physics_weight: 0.4
+  confidence_threshold: 0.75
+  
+  decision_rules:
+    - condition: "ml_score > 0.8 AND physics_anomaly > 0.7"
+      action: "high_priority_alert"
+      
+    - condition: "ml_score > 0.6 AND physics_anomaly > 0.5"
+      action: "medium_priority_alert"
+      
+    - condition: "ml_score < 0.3 OR physics_anomaly < 0.2"
+      action: "ignore"
+
+# Explainability
+explainability:
+  shap:
+    enabled: true
+    n_samples: 100
+    check_additivity: false
+    
+  physics:
+    enabled: true
+    voltage_threshold: 0.05  # 5% deviation
+    power_balance_threshold: 0.1  # 10% deviation
+
+# Performance Metrics
+metrics:
+  primary:
+    - MAE
+    - MAPE
+    - NDCG
+  
+  secondary:
+    - precision
+    - recall
+    - f1_score
+    - energy_recovery_per_visit
+    
+  reporting:
+    interval_hours: 24
+    save_to_db: true
+
+# Deployment
+deployment:
+  mode: "edge"  # edge, cloud, hybrid
+  
+  edge:
+    device_type: "nvidia_jetson"
+    max_concurrent_tasks: 10
+    memory_limit_gb: 8
+    
+  api:
+    host: "0.0.0.0"
+    port: 8000
+    workers: 4
+    timeout_seconds: 300
+    
+  monitoring:
+    log_level: "INFO"
+    metrics_interval_seconds: 60
+    alert_channels:
+      - email
+      - slack
